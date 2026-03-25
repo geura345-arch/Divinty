@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DivintyClass — Class Portal</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+
+<!-- ═══════════════════════════════════════════
+     FIREBASE — type="module" untuk import ES module
+     Semua fungsi di-expose ke window supaya app.js bisa akses
+═══════════════════════════════════════════ -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getDatabase, ref, set, onValue, update, push, remove, get }
+    from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAVwZ8N41ltNNQe2c1ZwkyHW5aveBMpLlg",
+    authDomain: "divinity-beaea.firebaseapp.com",
+    databaseURL: "https://divinity-beaea-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "divinity-beaea",
+    storageBucket: "divinity-beaea.firebasestorage.app",
+    messagingSenderId: "89096652727",
+    appId: "1:89096652727:web:c3863e9a9afe6cca718a32"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db  = getDatabase(app);
+
+  window.db        = db;
+  window.dbRef     = ref;
+  window.dbSet     = set;
+  window.dbOnValue = onValue;
+  window.dbUpdate  = update;
+  window.dbPush    = push;
+  window.dbRemove  = remove;
+  window.dbGet     = get;
+
+  // Sinyal ke app.js bahwa Firebase sudah siap
+  window.firebaseReady = true;
+  window.dispatchEvent(new Event('firebase-ready'));
+</script>
+</head>
+<body>
+
+<div class="bg-noise"></div>
+<div class="bg-gradient"></div>
+
+<div class="toast" id="toast">
+  <span class="toast-icon" id="toast-icon">✓</span>
+  <span id="toast-msg">Message</span>
+</div>
+
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal-box" id="modal-box">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- LOGIN PAGE -->
+<div class="page active" id="page-login">
+  <div class="login-brand">
+    <div class="logo-text">DIVINTY<span>CLASS</span></div>
+    <div class="logo-tagline">Portal Kelas Digital</div>
+  </div>
+
+  <div class="login-card">
+    <div class="login-tabs">
+      <button class="login-tab active" onclick="switchLoginTab('siswa', this)">👤 Siswa</button>
+      <button class="login-tab" onclick="switchLoginTab('admin', this)">👑 Admin</button>
+    </div>
+
+    <div id="form-siswa">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input class="form-input" type="text" id="login-username" placeholder="Nama kamu..." autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-input" type="password" id="login-password" placeholder="••••••••">
+      </div>
+      <button class="btn-primary" onclick="doLogin()">MASUK →</button>
+      <p class="switch-link">Belum punya akun? <a onclick="showRegister()">Daftar Sekarang</a></p>
+    </div>
+
+    <div id="form-admin" style="display:none">
+      <div class="form-group">
+        <label class="form-label">Password Admin</label>
+        <input class="form-input" type="password" id="admin-password" placeholder="••••••••••">
+      </div>
+      <button class="btn-primary" onclick="doAdminLogin()">AKSES ADMIN →</button>
+    </div>
+
+    <div id="form-register" style="display:none">
+      <div class="form-group">
+        <label class="form-label">Nama Lengkap</label>
+        <input class="form-input" type="text" id="reg-name" placeholder="Nama lengkap kamu...">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Tanggal Lahir</label>
+        <input class="form-input" type="date" id="reg-dob">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-input" type="password" id="reg-password" placeholder="Gunakan: Divintystudent">
+        <p style="font-size:0.72rem;color:var(--text-muted);margin-top:5px">Password siswa: <strong class="text-red">Divintystudent</strong></p>
+      </div>
+      <button class="btn-primary" onclick="doRegister()">DAFTAR SEKARANG →</button>
+      <p class="switch-link">Sudah punya akun? <a onclick="showLogin()">Masuk</a></p>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div class="page" id="page-app">
+
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-logo">DV</div>
+    <div class="nav-item active" onclick="showSection('dashboard', this)"><span class="nav-icon">🏠</span><span class="nav-label">Dashboard</span></div>
+    <div class="nav-item" onclick="showSection('tugas', this)"><span class="nav-icon">📚</span><span class="nav-label">Tugas</span><span class="nav-badge" id="tugas-badge" style="display:none">0</span></div>
+    <div class="nav-item" onclick="showSection('kelompok', this)"><span class="nav-icon">🎲</span><span class="nav-label">Kelompok</span></div>
+    <div class="nav-item" onclick="showSection('nilai', this)"><span class="nav-icon">📊</span><span class="nav-label">Nilai</span></div>
+    <div class="nav-item" onclick="showSection('rank', this)"><span class="nav-icon">🏆</span><span class="nav-label">Ranking</span></div>
+    <div class="nav-item" onclick="showSection('profile', this)"><span class="nav-icon">👤</span><span class="nav-label">Profil</span></div>
+    <div class="nav-item" onclick="showSection('divintybox', this)"><span class="nav-icon">📬</span><span class="nav-label">DivintyBox</span><span class="nav-badge" id="box-badge">0</span></div>
+    <div class="nav-item" onclick="showSection('admin', this)" id="admin-nav" style="display:none"><span class="nav-icon">⚙️</span><span class="nav-label">Admin Panel</span></div>
+    <div class="sidebar-footer">
+      <button class="sidebar-toggle" onclick="toggleSidebar()" id="sidebar-toggle-btn">⟩</button>
+    </div>
+  </nav>
+
+  <div class="main-content" id="main-content">
+
+    <!-- DASHBOARD -->
+    <div class="section active" id="section-dashboard">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="topbar-greeting" id="topbar-greeting">Selamat datang</div>
+          <div class="topbar-title">Halo, <strong id="topbar-name">—</strong></div>
+        </div>
+        <div class="topbar-right">
+          <div class="topbar-btn" onclick="showSection('divintybox')">📬<span class="badge" id="topbar-badge" style="display:none">0</span></div>
+          <div class="avatar-topbar" id="topbar-avatar" onclick="showSection('profile')">D</div>
+        </div>
+      </div>
+      <div class="hero-banner">
+        <div class="hero-content">
+          <div class="hero-tag">🔥 Portal Kelas</div>
+          <div class="hero-title">DivintyClass</div>
+          <div class="hero-sub">Selamat datang di portal kelas digital. Pantau nilai, tugas, dan kelompok kamu di sini.</div>
+        </div>
+        <div class="hero-emojis">📚✨</div>
+      </div>
+      <div class="stat-cards">
+        <div class="stat-card" style="--accent-bar:var(--red)"><div class="stat-icon">👥</div><div class="stat-value" id="stat-members">0</div><div class="stat-label">Anggota Kelas</div></div>
+        <div class="stat-card" style="--accent-bar:var(--teal)"><div class="stat-icon">📊</div><div class="stat-value" id="stat-avg">—</div><div class="stat-label">Rata-rata Nilai</div></div>
+        <div class="stat-card" style="--accent-bar:var(--gold)"><div class="stat-icon">🏆</div><div class="stat-value" id="stat-rank">#—</div><div class="stat-label">Ranking Kamu</div></div>
+        <div class="stat-card" style="--accent-bar:var(--purple)"><div class="stat-icon">🌐</div><div class="stat-value" id="stat-online">0</div><div class="stat-label">Sedang Online</div></div>
+      </div>
+      <div class="dash-grid">
+        <div>
+          <div class="section-head"><div class="section-title">📢 Pengumuman Terbaru</div><span class="see-more" onclick="showSection('tugas')">Lihat Semua →</span></div>
+          <div id="dash-announcements"><div class="empty-state"><div class="empty-icon">📭</div><p>Belum ada pengumuman</p></div></div>
+          <div class="mood-section">
+            <div class="section-head"><div class="section-title">🎭 Mood Hari Ini</div></div>
+            <div class="mood-grid" id="mood-grid"></div>
+            <div id="mood-selected-msg" style="display:none;margin-top:10px;font-size:0.82rem;color:var(--teal);font-weight:600;text-align:center"></div>
+          </div>
+        </div>
+        <div>
+          <div class="section-head"><div class="section-title">🎂 Ulang Tahun Berikutnya</div></div>
+          <div class="countdown-card">
+            <div class="countdown-name" id="birthday-name">Memuat...</div>
+            <div class="countdown-display">
+              <div class="cd-unit"><span class="cd-num" id="cd-days">00</span><span class="cd-label">Hari</span></div>
+              <div class="cd-unit"><span class="cd-num" id="cd-hours">00</span><span class="cd-label">Jam</span></div>
+              <div class="cd-unit"><span class="cd-num" id="cd-mins">00</span><span class="cd-label">Menit</span></div>
+              <div class="cd-unit"><span class="cd-num" id="cd-secs">00</span><span class="cd-label">Detik</span></div>
+            </div>
+          </div>
+          <div style="margin-top:16px">
+            <div class="section-head"><div class="section-title">🥇 Top 3</div><span class="see-more" onclick="showSection('rank')">Lihat →</span></div>
+            <div id="dash-top3"><div class="empty-state"><div class="empty-icon">🏆</div><p>Belum ada data</p></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TUGAS -->
+    <div class="section" id="section-tugas">
+      <div class="topbar"><div class="topbar-left"><div class="topbar-greeting">Section</div><div class="topbar-title">📚 Tugas & Info</div></div></div>
+      <div class="filter-tabs">
+        <button class="filter-tab active" onclick="filterTasks('all', this)">🗂️ Semua</button>
+        <button class="filter-tab" onclick="filterTasks('tugas', this)">✏️ Tugas</button>
+        <button class="filter-tab" onclick="filterTasks('info', this)">ℹ️ Info</button>
+        <button class="filter-tab" onclick="filterTasks('kelompok', this)">👥 Kelompok</button>
+      </div>
+      <div id="task-list"><div class="empty-state"><div class="empty-icon">📚</div><p>Belum ada item</p></div></div>
+    </div>
+
+    <!-- KELOMPOK -->
+    <div class="section" id="section-kelompok">
+      <div class="topbar"><div class="topbar-left"><div class="topbar-greeting">Section</div><div class="topbar-title">🎲 Pembagian Kelompok</div></div></div>
+      <div id="kelompok-admin-controls" style="display:none">
+        <div class="kelompok-wrap">
+          <div class="kelompok-controls">
+            <div class="section-title mb-12">📋 Absensi Hari Ini</div>
+            <div class="absen-count"><span>Hadir: <span class="absen-count-num" id="absen-hadir-num">0</span></span><span class="text-muted">dari <span id="absen-total-num">0</span></span></div>
+            <div style="margin-bottom:10px;display:flex;gap:8px">
+              <button class="btn-secondary" onclick="setAllAbsen(true)" style="font-size:0.75rem;padding:6px 12px">✅ Semua Hadir</button>
+              <button class="btn-secondary" onclick="setAllAbsen(false)" style="font-size:0.75rem;padding:6px 12px">❌ Reset</button>
+            </div>
+            <table class="absen-table"><thead><tr><th>Nama</th><th>Status</th></tr></thead><tbody id="absen-tbody"></tbody></table>
+          </div>
+          <div class="kelompok-controls">
+            <div class="section-title mb-12">⚙️ Pengaturan</div>
+            <div class="form-group">
+              <label class="form-label">Jumlah Kelompok</label>
+              <div class="group-settings-row">
+                <input type="number" class="number-input" id="group-count" value="4" min="2" max="20">
+                <span class="text-muted" style="font-size:0.8rem">kelompok</span>
+              </div>
+              <p style="font-size:0.75rem;color:var(--text-muted);margin-top:4px" id="group-calc-info">Sistem menyesuaikan otomatis</p>
+            </div>
+            <button class="btn-primary" style="margin-bottom:10px" onclick="startGroupAnimation()">🎰 ACAK KELOMPOK</button>
+            <button class="btn-secondary" onclick="resetGroups()">🔄 Reset</button>
+            <div class="spin-center">
+              <div class="spinning-wheel" id="spinning-wheel">Siap membagi<br><strong id="total-members-count">0</strong> anggota</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="kelompok-student-view" style="display:none">
+        <div class="card" style="text-align:center;padding:32px;margin-bottom:20px">
+          <div style="font-size:3rem;margin-bottom:12px">👁️</div>
+          <div style="font-weight:700;margin-bottom:6px">Mode Tampilan Siswa</div>
+          <div class="text-muted" style="font-size:0.85rem">Pembagian kelompok hanya bisa dilakukan oleh Admin.</div>
+        </div>
+      </div>
+      <div id="groups-result">
+        <div class="section-head" id="groups-result-head" style="display:none"><div class="section-title">🎯 Hasil Kelompok</div></div>
+        <div class="groups-display" id="groups-display"></div>
+      </div>
+    </div>
+
+    <!-- NILAI -->
+    <div class="section" id="section-nilai">
+      <div class="topbar"><div class="topbar-left"><div class="topbar-greeting">Section</div><div class="topbar-title">📊 Nilai Akademik</div></div></div>
+      <div class="sem-tabs">
+        <button class="sem-tab active" onclick="switchSem(1,this)">Sem 1</button>
+        <button class="sem-tab" onclick="switchSem(2,this)">Sem 2</button>
+        <button class="sem-tab" onclick="switchSem(3,this)">Sem 3</button>
+        <button class="sem-tab" onclick="switchSem(4,this)">Sem 4</button>
+        <button class="sem-tab" onclick="switchSem(5,this)">Sem 5</button>
+        <button class="sem-tab" onclick="switchSem(6,this)">Sem 6</button>
+        <button class="sem-tab" onclick="switchSem('all',this)">📈 Semua</button>
+      </div>
+      <div class="grid-2">
+        <div>
+          <div class="section-title mb-12">📝 Input Nilai</div>
+          <div id="grade-inputs"></div>
+          <button class="add-subject-btn" onclick="addCustomSubject()">+ Tambah Mata Pelajaran</button>
+          <button class="btn-primary" style="margin-top:14px" onclick="saveGrades()">💾 SIMPAN NILAI</button>
+        </div>
+        <div>
+          <div class="section-title mb-12">📊 Grafik Nilai</div>
+          <div class="chart-wrap"><canvas id="grade-chart"></canvas></div>
+          <div class="chart-wrap mt-12" style="height:180px"><canvas id="avg-chart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RANKING -->
+    <div class="section" id="section-rank">
+      <div class="topbar"><div class="topbar-left"><div class="topbar-greeting">Section</div><div class="topbar-title">🏆 Ranking Kelas</div></div></div>
+      <div class="admin-tabs">
+        <button class="admin-tab active" onclick="switchRankCat('overall',this)">🏆 Keseluruhan</button>
+        <button class="admin-tab" onclick="switchRankCat('mapel',this)">📚 Per Mapel</button>
+        <button class="admin-tab" onclick="switchRankCat('stable',this)">📈 Paling Stabil</button>
+      </div>
+      <div id="rank-mapel-selector" style="display:none;margin-bottom:14px">
+        <select class="form-select" id="rank-mapel-select" onchange="renderRank()" style="max-width:220px"></select>
+      </div>
+      <div class="card" style="margin-bottom:16px"><div class="podium" id="podium"></div></div>
+      <div id="rank-list"></div>
+    </div>
+
+    <!-- PROFILE -->
+    <div class="section" id="section-profile">
+      <div class="topbar"><div class="topbar-left"><div class="topbar-greeting">Section</div><div class="topbar-title">👤 Profil Saya</div></div></div>
+      <div class="profile-header">
+        <div class="profile-avatar-wrap" onclick="triggerAvatarUpload()">
+          <div class="profile-avatar" id="profile-avatar-display">D</div>
+          <div class="profile-avatar-edit">✏️</div>
+          <input type="file" id="avatar-upload" accept="image/*" style="display:none" onchange="handleAvatarUpload(event)">
+        </div>
+        <div>
+          <div class="profile-name" id="profile-name-display">—</div>
+          <div class="profile-role" id="profile-role-display">Siswa</div>
+          <div class="profile-stats">
+            <div class="profile-stat"><div class="val" id="profile-avg">—</div><div class="lbl">Avg Nilai</div></div>
+            <div class="profile-stat"><div class="val" id="profile-rank">—</div><div class="lbl">Ranking</div></div>
+            <div class="profile-stat"><div class="val" id="profile-mood-stat">😐</div><div class="lbl">Mood</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="section-title mb-12">📋 Info Profil</div>
+          <div class="info-row"><span class="lbl">👤 Username</span><span class="val" id="info-username">—</span></div>
+          <div class="info-row"><span class="lbl">🎂 Tanggal Lahir</span><span class="val" id="info-dob">—</span></div>
+          <div class="info-row"><span class="lbl">🎯 Umur</span><span class="val" id="info-age">—</span></div>
+          <div class="info-row"><span class="lbl">📅 Bergabung</span><span class="val" id="info-joined">—</span></div>
+        </div>
+        <div class="card">
+          <div class="section-title mb-12">🎭 Mood Saat Ini</div>
+          <div style="text-align:center;padding:24px 0">
+            <div style="font-size:3.5rem" id="current-mood-display">😐</div>
+            <div class="text-muted mt-8" style="font-size:0.82rem" id="current-mood-label">Pilih mood di Dashboard</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DIVINTYBOX -->
+    <div class="section" id="section-divintybox">
+      <div class="topbar">
+        <div class="topbar-left"><div class="topbar-greeting">Section</div><div class="topbar-title">📬 DivintyBox</div></div>
+        <div class="topbar-right"><span class="mark-all-btn" onclick="markAllRead()">Tandai semua dibaca</span></div>
+      </div>
+      <div id="notif-list"><div class="empty-state"><div class="empty-icon">📭</div><p>Tidak ada notifikasi</p></div></div>
+    </div>
+
+    <!-- ADMIN PANEL -->
+    <div class="section" id="section-admin">
+      <div class="topbar"><div class="topbar-left"><div class="topbar-greeting">⚙️ Admin</div><div class="topbar-title">Panel Admin</div></div></div>
+      <div class="admin-tabs">
+        <button class="admin-tab active" onclick="switchAdminTab('users',this)">👥 Kelola Siswa</button>
+        <button class="admin-tab" onclick="switchAdminTab('absen',this)">📋 Absensi</button>
+        <button class="admin-tab" onclick="switchAdminTab('announce',this)">📢 Pengumuman</button>
+        <button class="admin-tab" onclick="switchAdminTab('online',this)">🌐 Online</button>
+        <button class="admin-tab" onclick="switchAdminTab('promote',this)">⬆️ Promosi</button>
+      </div>
+      <div id="admin-tab-users">
+        <div class="section-title mb-12">👥 Daftar Siswa</div>
+        <div id="admin-user-list"><div class="empty-state"><div class="empty-icon">👥</div><p>Belum ada siswa</p></div></div>
+      </div>
+      <div id="admin-tab-absen" style="display:none">
+        <div class="section-title mb-12">📋 Kelola Absensi</div>
+        <div style="margin-bottom:12px;display:flex;gap:8px">
+          <button class="btn-secondary" onclick="setAllAbsen(true)" style="font-size:0.78rem">✅ Semua Hadir</button>
+          <button class="btn-secondary" onclick="setAllAbsen(false)" style="font-size:0.78rem">❌ Reset</button>
+        </div>
+        <table class="absen-table"><thead><tr><th>Nama</th><th>Status</th></tr></thead><tbody id="admin-absen-tbody"></tbody></table>
+      </div>
+      <div id="admin-tab-announce" style="display:none">
+        <div class="section-title mb-12">📢 Buat Pengumuman</div>
+        <div class="card" style="margin-bottom:20px">
+          <div class="form-group"><label class="form-label">Judul</label><input class="form-input" type="text" id="ann-title-input" placeholder="Judul..."></div>
+          <div class="grid-2">
+            <div class="form-group"><label class="form-label">Kategori</label><select class="form-select" id="ann-type-input" onchange="toggleTaskFields()"><option value="info">ℹ️ Info</option><option value="tugas">✏️ Tugas</option><option value="kelompok">👥 Kelompok</option></select></div>
+            <div class="form-group"><label class="form-label">Mapel (opsional)</label><input class="form-input" type="text" id="ann-subject-input" placeholder="Matematika..."></div>
+          </div>
+          <div class="form-group" id="task-fields" style="display:none"><label class="form-label">Deadline</label><input class="form-input" type="datetime-local" id="ann-deadline-input"></div>
+          <div class="form-group"><label class="form-label">Isi</label><textarea class="form-input" id="ann-body-input" rows="4" placeholder="Isi pengumuman..."></textarea></div>
+          <button class="btn-primary" onclick="postAnnouncement()">📤 KIRIM</button>
+        </div>
+        <div class="section-title mb-12">📋 Pengumuman Aktif</div>
+        <div id="admin-ann-list"></div>
+      </div>
+      <div id="admin-tab-online" style="display:none">
+        <div class="section-title mb-12">🌐 Siswa Online</div>
+        <div id="online-list"></div>
+      </div>
+      <div id="admin-tab-promote" style="display:none">
+        <div class="section-title mb-12">⬆️ Promosi / Cabut</div>
+        <div id="promote-list"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <nav class="mobile-nav">
+    <div class="mobile-nav-item active" onclick="showSection('dashboard',null,'mobile')"><span class="m-icon">🏠</span>Home</div>
+    <div class="mobile-nav-item" onclick="showSection('tugas',null,'mobile')"><span class="m-icon">📚</span>Tugas</div>
+    <div class="mobile-nav-item" onclick="showSection('kelompok',null,'mobile')"><span class="m-icon">🎲</span>Kelompok</div>
+    <div class="mobile-nav-item" onclick="showSection('rank',null,'mobile')"><span class="m-icon">🏆</span>Rank</div>
+    <div class="mobile-nav-item" onclick="showSection('divintybox',null,'mobile')"><span class="m-icon">📬</span>Box</div>
+    <div class="mobile-nav-item" onclick="showSection('profile',null,'mobile')"><span class="m-icon">👤</span>Profil</div>
+  </nav>
+
+</div>
+
+<!-- ═══════════════════════════════════════════
+     APP.JS — WAJIB pakai script biasa (bukan module)!
+     Ini yang bikin onclick di HTML bisa manggil fungsi.
+     Kalau pakai type="module", semua fungsi jadi private
+     dan onclick="doLogin()" dll tidak akan bisa jalan.
+═══════════════════════════════════════════ -->
+<script src="app.js"></script>
+</body>
+</html>
