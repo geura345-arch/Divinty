@@ -180,6 +180,15 @@ function loadDB() {
       if (!isInitialLoad) {
         // Realtime update saat app sudah jalan
         if (document.getElementById('page-app').classList.contains('active')) {
+          // Sync currentUser dari DB terbaru (supaya data diri siswa juga ikut update)
+          if (currentUser && !currentUser.isAdmin && DB.users[currentUser.username]) {
+            // Update field dari DB tapi jangan timpa isAdmin/isSubAdmin yang sudah di-set
+            var fresh = DB.users[currentUser.username];
+            currentUser.name      = fresh.name      || currentUser.name;
+            currentUser.dob       = fresh.dob       || currentUser.dob;
+            currentUser.joinDate  = fresh.joinDate  || currentUser.joinDate;
+            currentUser.isSubAdmin= fresh.isSubAdmin|| false;
+          }
           renderDashboard();
           updateBadge();
           var activeSection = document.querySelector('.section.active');
@@ -1131,6 +1140,62 @@ function renderProfile() {
   } else {
     avatarEl.innerHTML = name.charAt(0).toUpperCase();
   }
+
+  // Tampilkan form edit profil untuk siswa (bukan admin)
+  var editSection = document.getElementById('profile-edit-section');
+  if (editSection) {
+    if (!isAdmin) {
+      editSection.style.display = 'block';
+      var nameInput = document.getElementById('profile-edit-name');
+      var dobInput  = document.getElementById('profile-edit-dob');
+      if (nameInput) nameInput.value = currentUser.name || '';
+      if (dobInput)  dobInput.value  = currentUser.dob  || '';
+    } else {
+      editSection.style.display = 'none';
+    }
+  }
+}
+
+function saveProfileSiswa() {
+  if (!currentUser || currentUser.isAdmin) return;
+  var nameEl = document.getElementById('profile-edit-name');
+  var dobEl  = document.getElementById('profile-edit-dob');
+  if (!nameEl || !dobEl) return;
+  var newName = nameEl.value.trim();
+  var newDob  = dobEl.value;
+  if (!newName) { showToast('Nama tidak boleh kosong!','error','⚠️'); return; }
+
+  var username = currentUser.username;
+
+  // Update lokal
+  currentUser.name = newName;
+  if (newDob) currentUser.dob = newDob;
+  if (DB.users[username]) {
+    DB.users[username].name = newName;
+    if (newDob) DB.users[username].dob = newDob;
+  }
+
+  // Simpan granular ke Firebase
+  waitForFirebase(function() {
+    var updates = {};
+    updates['divinty_v3/users/' + username + '/name'] = newName;
+    if (newDob) updates['divinty_v3/users/' + username + '/dob'] = newDob;
+    window.dbUpdate(window.dbRef(window.db), updates)
+      .then(function() { showToast('Profil berhasil disimpan!','success','✅'); })
+      .catch(function(e){ console.error('Save profile error:', e); showToast('Gagal menyimpan profil!','error','❌'); });
+  });
+
+  // Update topbar nama
+  document.getElementById('topbar-name').textContent = newName;
+  document.getElementById('topbar-avatar').textContent = newName.charAt(0).toUpperCase();
+  if (DB.avatars && DB.avatars[username]) {
+    var tv = document.getElementById('topbar-avatar');
+    tv.style.backgroundImage = 'url(' + DB.avatars[username] + ')';
+    tv.style.backgroundSize  = 'cover';
+    tv.textContent = '';
+  }
+
+  renderProfile();
 }
 
 function triggerAvatarUpload() {
@@ -1247,9 +1312,77 @@ function renderAdminUsers() {
       '<div class="' + (online?'online-dot':'offline-dot') + '"></div>' +
       '<div class="member-avatar">' + u.name.charAt(0) + '</div>' +
       '<div class="user-info" style="flex:1"><div class="user-name">' + u.name + (u.isSubAdmin?' 🛡️':'') + '</div>' +
-      '<div class="user-meta">📅 ' + (u.dob?formatDate(u.dob):'—') + ' · ' + formatDate(u.joinDate) + '</div></div>' +
-      '<div class="user-actions"><button class="btn-icon danger" onclick="deleteUser(\'' + u.username + '\')" title="Hapus">🗑️</button></div></div>';
+      '<div class="user-meta">📅 ' + (u.dob?formatDate(u.dob):'—') + ' · 🗓️ ' + formatDate(u.joinDate) + '</div></div>' +
+      '<div class="user-actions">' +
+      '<button class="btn-icon" onclick="adminViewProfile(\'' + u.username + '\')" title="Kelola Profil" style="font-size:1rem">👤</button>' +
+      '<button class="btn-icon danger" onclick="deleteUser(\'' + u.username + '\')" title="Hapus">🗑️</button>' +
+      '</div></div>';
   }).join('');
+}
+
+// ─── ADMIN KELOLA PROFIL SISWA ───
+function adminViewProfile(username) {
+  var u = DB.users[username];
+  if (!u) { showToast('User tidak ditemukan!','error','❌'); return; }
+  var avg  = calcUserAvg(username);
+  var rank = getUserRank(username);
+  var mood = DB.moods && DB.moods[username];
+  var avatarHtml = (DB.avatars && DB.avatars[username])
+    ? '<img src="' + DB.avatars[username] + '" style="width:72px;height:72px;border-radius:12px;object-fit:cover">'
+    : '<div style="width:72px;height:72px;border-radius:12px;background:var(--red);display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;font-weight:700">' + u.name.charAt(0).toUpperCase() + '</div>';
+
+  openModal(
+    '<div style="padding:4px">' +
+    '<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">' +
+      avatarHtml +
+      '<div>' +
+        '<div style="font-size:1.1rem;font-weight:700;color:var(--text-primary)">' + u.name + (u.isSubAdmin?' 🛡️':'') + '</div>' +
+        '<div style="font-size:0.78rem;color:var(--text-muted)">@' + u.username + '</div>' +
+        '<div style="font-size:0.78rem;color:var(--teal);margin-top:4px">' + (isUserOnline(username)?'🟢 Online':'⚫ Offline') + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">' +
+      '<div style="background:var(--surface);border-radius:10px;padding:10px;text-align:center"><div style="font-size:1.3rem;font-weight:700;color:var(--teal)">' + (avg?avg.toFixed(1):'—') + '</div><div style="font-size:0.72rem;color:var(--text-muted)">Rata-rata Nilai</div></div>' +
+      '<div style="background:var(--surface);border-radius:10px;padding:10px;text-align:center"><div style="font-size:1.3rem;font-weight:700;color:var(--gold-light)">' + (rank?'#'+rank:'—') + '</div><div style="font-size:0.72rem;color:var(--text-muted)">Ranking</div></div>' +
+    '</div>' +
+    '<div class="section-title" style="margin-bottom:12px">✏️ Edit Profil</div>' +
+    '<div class="form-group"><label class="form-label">Nama Lengkap</label>' +
+      '<input class="form-input" type="text" id="admin-edit-name" value="' + u.name + '" placeholder="Nama lengkap..."></div>' +
+    '<div class="form-group"><label class="form-label">Tanggal Lahir</label>' +
+      '<input class="form-input" type="date" id="admin-edit-dob" value="' + (u.dob||'') + '"></div>' +
+    '<div class="info-row" style="margin-bottom:14px"><span class="lbl">📅 Bergabung</span><span class="val">' + formatDate(u.joinDate) + '</span></div>' +
+    (mood ? '<div class="info-row" style="margin-bottom:14px"><span class="lbl">Mood</span><span class="val">' + mood.emoji + ' ' + mood.label + '</span></div>' : '') +
+    '<div style="display:flex;gap:10px;margin-top:6px">' +
+      '<button class="btn-primary" style="flex:1" onclick="adminSaveProfile(\'' + username + '\')">💾 Simpan</button>' +
+      '<button class="btn-secondary" onclick="closeModal()">Batal</button>' +
+    '</div>' +
+    '</div>'
+  );
+}
+
+function adminSaveProfile(username) {
+  var u = DB.users[username];
+  if (!u) return;
+  var newName = document.getElementById('admin-edit-name') ? document.getElementById('admin-edit-name').value.trim() : '';
+  var newDob  = document.getElementById('admin-edit-dob')  ? document.getElementById('admin-edit-dob').value  : '';
+  if (!newName) { showToast('Nama tidak boleh kosong!','error','⚠️'); return; }
+
+  // Cek kalau nama berubah, slug username tetap (jangan ubah key)
+  u.name = newName;
+  if (newDob) u.dob = newDob;
+
+  // Simpan granular ke Firebase
+  waitForFirebase(function() {
+    var updates = {};
+    updates['divinty_v3/users/' + username + '/name'] = newName;
+    if (newDob) updates['divinty_v3/users/' + username + '/dob'] = newDob;
+    window.dbUpdate(window.dbRef(window.db), updates)
+      .then(function() { showToast('Profil ' + newName + ' berhasil disimpan!','success','✅'); })
+      .catch(function(e){ console.error('Admin save profile error:', e); showToast('Gagal menyimpan!','error','❌'); });
+  });
+
+  closeModal();
+  renderAdminUsers();
 }
 
 function deleteUser(username) {
@@ -1335,11 +1468,23 @@ function deleteAnn(id) {
 
 function renderOnlineList() {
   var el    = document.getElementById('online-list');
-  var users = Object.values(DB.users || {}).filter(function(u) { return isUserOnline(u.username); });
-  if (!users.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">🌐</div><p>Tidak ada siswa online</p></div>'; return; }
-  el.innerHTML = users.map(function(u) {
-    return '<div class="user-row"><div class="online-dot"></div><div class="member-avatar">' + u.name.charAt(0) + '</div><div class="user-info"><div class="user-name">' + u.name + '</div><div class="user-meta" style="color:var(--teal)">🟢 Online</div></div></div>';
+  // Tampilkan siswa online
+  var onlineSiswa = Object.values(DB.users || {}).filter(function(u) { return isUserOnline(u.username); });
+  // Cek juga admin
+  var adminOnline = isUserOnline(ADMIN_KEY);
+  var html = '';
+  if (adminOnline) {
+    html += '<div class="user-row"><div class="online-dot"></div><div class="member-avatar" style="background:var(--red)">A</div><div class="user-info"><div class="user-name">Admin 👑</div><div class="user-meta" style="color:var(--teal)">🟢 Online</div></div></div>';
+  }
+  html += onlineSiswa.map(function(u) {
+    return '<div class="user-row"><div class="online-dot"></div><div class="member-avatar">' + u.name.charAt(0) + '</div><div class="user-info"><div class="user-name">' + u.name + (u.isSubAdmin?' 🛡️':'') + '</div><div class="user-meta" style="color:var(--teal)">🟢 Online</div></div></div>';
   }).join('');
+  if (!html) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">🌐</div><p>Tidak ada yang online</p></div>';
+  } else {
+    var totalOnline = onlineSiswa.length + (adminOnline ? 1 : 0);
+    el.innerHTML = '<div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:12px">Total online: <strong style="color:var(--teal)">' + totalOnline + ' orang</strong></div>' + html;
+  }
 }
 
 function renderPromoteList() {
@@ -1389,8 +1534,10 @@ function isUserOnline(username) {
   return (Date.now() - last) < 120000; // 2 menit threshold
 }
 function countOnline() {
-  // Hanya hitung user yang terdaftar di DB.users (exclude admin phantom key)
-  return Object.keys(DB.users || {}).filter(function(k) { return isUserOnline(k); }).length;
+  // Hitung siswa online + admin kalau online
+  var siswaOnline = Object.keys(DB.users || {}).filter(function(k) { return isUserOnline(k); }).length;
+  var adminOnline = isUserOnline(ADMIN_KEY) ? 1 : 0;
+  return siswaOnline + adminOnline;
 }
 
 // ─── MODAL ───
