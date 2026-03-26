@@ -186,6 +186,24 @@ function loadDB() {
           if (activeSection) {
             var sid = activeSection.id.replace('section-', '');
             if (sid === 'tugas') renderTasks(announcementFilter);
+            if (sid === 'admin') {
+              // Refresh tab admin yang sedang aktif
+              var activeAdminTabEl = document.querySelector('#section-admin .admin-tab.active');
+              if (activeAdminTabEl) {
+                var tabOnclick = activeAdminTabEl.getAttribute('onclick') || '';
+                if (tabOnclick.indexOf("'online'") >= 0)   renderOnlineList();
+                else if (tabOnclick.indexOf("'promote'") >= 0) renderPromoteList();
+                else if (tabOnclick.indexOf("'absen'") >= 0)   renderAdminAbsensi();
+                else if (tabOnclick.indexOf("'announce'") >= 0) renderAdminAnn();
+                else renderAdminUsers();
+              } else {
+                renderAdminUsers();
+              }
+            }
+            if (sid === 'kelompok') {
+              var isAdminRT = currentUser && (currentUser.isAdmin || currentUser.isSubAdmin);
+              if (isAdminRT) renderAbsensiTable();
+            }
           }
         }
       }
@@ -195,26 +213,87 @@ function loadDB() {
 }
 
 // ─── SAVE DB ───
-// Simpan hanya node yang berubah supaya lebih efisien
-function saveDB() {
+// Simpan per-path agar tidak terblokir Firebase rules
+// Setiap path disimpan terpisah sesuai hak akses user
+function saveDB(opts) {
+  // opts: { keys: ['users','grades',...] } untuk simpan subset
   if (isSaving) return;
   isSaving = true;
   waitForFirebase(function() {
-    var key = currentUser ? (currentUser.username || ADMIN_KEY) : ADMIN_KEY;
+    var ukey = currentUser ? (currentUser.username || ADMIN_KEY) : ADMIN_KEY;
+    var isAdmin = currentUser && (currentUser.isAdmin || false);
+
+    // Update online timestamp lokal
     if (!DB.online) DB.online = {};
-    DB.online[key] = Date.now();
+    DB.online[ukey] = Date.now();
 
-    var updates = {};
-    updates['divinty_v3/users']         = DB.users;
-    updates['divinty_v3/grades']        = DB.grades;
-    updates['divinty_v3/notifications'] = DB.notifications;
-    updates['divinty_v3/avatars']       = DB.avatars;
-    updates['divinty_v3/moods']         = DB.moods;
-    updates['divinty_v3/online']        = DB.online;
-    updates['divinty_v3/announcements'] = DB.announcements;
-    updates['divinty_v3/absensi']       = DB.absensi;
+    // Tentukan path yang akan disimpan
+    var allKeys = opts && opts.keys ? opts.keys : ['users','grades','notifications','avatars','moods','online','announcements','absensi'];
 
-    window.dbUpdate(window.dbRef(window.db), updates)
+    var promises = [];
+
+    allKeys.forEach(function(k) {
+      var val = DB[k];
+      if (val === undefined) return;
+
+      if (k === 'online') {
+        // Online: simpan hanya entry user sendiri
+        var ref = window.dbRef(window.db, 'divinty_v3/online/' + ukey);
+        promises.push(window.dbSet(ref, DB.online[ukey]).catch(function(e){ console.error('Save online error:', e); }));
+      } else if (k === 'users') {
+        if (isAdmin) {
+          // Admin: simpan seluruh users node
+          var ref = window.dbRef(window.db, 'divinty_v3/users');
+          promises.push(window.dbSet(ref, DB.users || {}).catch(function(e){ console.error('Save users error:', e); }));
+        } else if (currentUser && currentUser.username) {
+          // Siswa: hanya simpan data diri sendiri
+          var ref = window.dbRef(window.db, 'divinty_v3/users/' + currentUser.username);
+          if (DB.users[currentUser.username]) {
+            promises.push(window.dbSet(ref, DB.users[currentUser.username]).catch(function(e){ console.error('Save user self error:', e); }));
+          }
+        }
+      } else if (k === 'grades') {
+        if (isAdmin) {
+          var ref = window.dbRef(window.db, 'divinty_v3/grades');
+          promises.push(window.dbSet(ref, DB.grades || {}).catch(function(e){ console.error('Save grades error:', e); }));
+        } else if (currentUser && currentUser.username) {
+          var ref = window.dbRef(window.db, 'divinty_v3/grades/' + currentUser.username);
+          promises.push(window.dbSet(ref, DB.grades[currentUser.username] || {}).catch(function(e){ console.error('Save grades self error:', e); }));
+        }
+      } else if (k === 'notifications') {
+        if (isAdmin) {
+          var ref = window.dbRef(window.db, 'divinty_v3/notifications');
+          promises.push(window.dbSet(ref, DB.notifications || {}).catch(function(e){ console.error('Save notif error:', e); }));
+        } else if (currentUser && currentUser.username) {
+          var ref = window.dbRef(window.db, 'divinty_v3/notifications/' + currentUser.username);
+          promises.push(window.dbSet(ref, DB.notifications[currentUser.username] || {}).catch(function(e){ console.error('Save notif self error:', e); }));
+        }
+      } else if (k === 'avatars') {
+        var avatarKey = currentUser ? (currentUser.username || ADMIN_KEY) : ADMIN_KEY;
+        if (DB.avatars && DB.avatars[avatarKey]) {
+          var ref = window.dbRef(window.db, 'divinty_v3/avatars/' + avatarKey);
+          promises.push(window.dbSet(ref, DB.avatars[avatarKey]).catch(function(e){ console.error('Save avatar error:', e); }));
+        }
+      } else if (k === 'moods') {
+        var moodKey = currentUser ? (currentUser.username || ADMIN_KEY) : ADMIN_KEY;
+        if (DB.moods && DB.moods[moodKey]) {
+          var ref = window.dbRef(window.db, 'divinty_v3/moods/' + moodKey);
+          promises.push(window.dbSet(ref, DB.moods[moodKey]).catch(function(e){ console.error('Save mood error:', e); }));
+        }
+      } else if (k === 'announcements') {
+        if (isAdmin || (currentUser && currentUser.isSubAdmin)) {
+          var ref = window.dbRef(window.db, 'divinty_v3/announcements');
+          promises.push(window.dbSet(ref, DB.announcements || {}).catch(function(e){ console.error('Save ann error:', e); }));
+        }
+      } else if (k === 'absensi') {
+        if (isAdmin || (currentUser && currentUser.isSubAdmin)) {
+          var ref = window.dbRef(window.db, 'divinty_v3/absensi');
+          promises.push(window.dbSet(ref, DB.absensi || {}).catch(function(e){ console.error('Save absensi error:', e); }));
+        }
+      }
+    });
+
+    Promise.all(promises)
       .catch(function(e) { console.error('Firebase Save Error:', e); })
       .finally(function() { setTimeout(function() { isSaving = false; }, 400); });
   });
@@ -340,8 +419,16 @@ function doRegister() {
   DB.users[username] = { username: username, name: name, dob: dob, password: password, joinDate: new Date().toISOString(), isSubAdmin: false };
   DB.absensi[username] = true;
   addNotif(username, '🎉 Selamat Datang!', 'Halo ' + name + '! Akun kamu berhasil dibuat.', 'system');
-  saveDB();
-  showToast('Akun ' + name + ' berhasil dibuat!','success','🎉');
+  // Simpan granular: hanya node user baru, absensi, dan notif
+  waitForFirebase(function() {
+    var updates = {};
+    updates['divinty_v3/users/' + username]         = DB.users[username];
+    updates['divinty_v3/absensi/' + username]       = true;
+    updates['divinty_v3/notifications/' + username] = DB.notifications[username] || {};
+    window.dbUpdate(window.dbRef(window.db), updates)
+      .then(function() { showToast('Akun ' + name + ' berhasil dibuat!','success','🎉'); })
+      .catch(function(e) { console.error('Register error:', e); showToast('Gagal membuat akun!','error','❌'); });
+  });
   showLogin();
   document.getElementById('login-username').value = username;
 }
@@ -351,20 +438,29 @@ function loginAs(user, rememberMe) {
   if (!DB.online) DB.online = {};
   DB.online[user.username || ADMIN_KEY] = Date.now();
 
-  // Simpan mapping Firebase UID → role/username
+  // Simpan mapping Firebase UID → role/username DULU sebelum save data lain
   // Ini yang dipakai rules untuk tahu siapa admin
   var uid = window.firebaseUID;
   if (uid) {
     waitForFirebase(function() {
-      var updates = {};
-      updates['divinty_v3/uid_map/' + uid] = {
+      var uidMapRef = window.dbRef(window.db, 'divinty_v3/uid_map/' + uid);
+      window.dbSet(uidMapRef, {
         role: user.isAdmin ? 'admin' : 'student',
         username: user.username || ADMIN_KEY
-      };
-      window.dbUpdate(window.dbRef(window.db), updates).catch(function(){});
+      }).then(function() {
+        // uid_map sudah tersimpan, baru save data lain
+        _doLoginSave(user, rememberMe);
+      }).catch(function(e) {
+        console.warn('uid_map save failed, trying anyway:', e);
+        _doLoginSave(user, rememberMe);
+      });
     });
+  } else {
+    _doLoginSave(user, rememberMe);
   }
+}
 
+function _doLoginSave(user, rememberMe) {
   if (rememberMe !== false) {
     try {
       localStorage.setItem('dv_session', JSON.stringify({
@@ -374,7 +470,12 @@ function loginAs(user, rememberMe) {
       }));
     } catch(e) {}
   }
-  saveDB();
+  // Hanya save online status saat login (tidak perlu save semua data)
+  waitForFirebase(function() {
+    var ukey = user.username || ADMIN_KEY;
+    var onlineRef = window.dbRef(window.db, 'divinty_v3/online/' + ukey);
+    window.dbSet(onlineRef, Date.now()).catch(function(){});
+  });
   transitionPage('login', 'app', function() {
     initApp();
     showToast('Selamat datang, ' + user.name + '! 👋','success','✅');
@@ -559,7 +660,11 @@ function selectMood(i) {
   var key  = currentUser ? (currentUser.username || ADMIN_KEY) : ADMIN_KEY;
   if (!DB.moods) DB.moods = {};
   DB.moods[key] = { emoji: mood.emoji, label: mood.label, time: Date.now() };
-  saveDB();
+  // Simpan granular mood
+  waitForFirebase(function() {
+    var ref = window.dbRef(window.db, 'divinty_v3/moods/' + key);
+    window.dbSet(ref, DB.moods[key]).catch(function(e){ console.error('Save mood error:', e); });
+  });
   var msg = document.getElementById('mood-selected-msg');
   if (msg) { msg.style.display = 'block'; msg.textContent = 'Mood hari ini: ' + mood.emoji + ' ' + mood.label; }
   document.getElementById('current-mood-display').textContent = mood.emoji;
@@ -667,7 +772,10 @@ function renderAbsensiTable() {
 function toggleAbsen(username) {
   var current = DB.absensi[username] !== false;
   DB.absensi[username] = !current;
-  saveDB();
+  waitForFirebase(function() {
+    var ref = window.dbRef(window.db, 'divinty_v3/absensi/' + username);
+    window.dbSet(ref, DB.absensi[username]).catch(function(e){ console.error('Absen error:', e); });
+  });
   var hadir  = DB.absensi[username];
   var toggle = document.getElementById('absen-' + username);
   var label  = document.getElementById('absen-label-' + username);
@@ -679,7 +787,10 @@ function toggleAbsen(username) {
 
 function setAllAbsen(val) {
   Object.keys(DB.users || {}).forEach(function(u) { DB.absensi[u] = val; });
-  saveDB();
+  waitForFirebase(function() {
+    var ref = window.dbRef(window.db, 'divinty_v3/absensi');
+    window.dbSet(ref, DB.absensi || {}).catch(function(e){ console.error('setAllAbsen error:', e); });
+  });
   renderAbsensiTable();
   updateGroupCalcInfo();
 }
@@ -827,8 +938,13 @@ function saveGrades() {
     var el = document.getElementById('gv-' + s.replace(/\s/g,'_'));
     if (el) DB.grades[key][currentSem][s] = parseFloat(el.value) || 0;
   });
-  saveDB();
-  showToast('Nilai semester ' + currentSem + ' tersimpan!','success','💾');
+  // Simpan hanya grades node untuk user ini
+  waitForFirebase(function() {
+    var ref = window.dbRef(window.db, 'divinty_v3/grades/' + key);
+    window.dbSet(ref, DB.grades[key])
+      .then(function() { showToast('Nilai semester ' + currentSem + ' tersimpan!','success','💾'); })
+      .catch(function(e) { console.error('Save grades error:', e); showToast('Gagal menyimpan nilai!','error','❌'); });
+  });
   renderGrades();
 }
 
@@ -842,7 +958,11 @@ function addCustomSubject() {
   if (!DB.grades[key].customSubjects) DB.grades[key].customSubjects = [];
   if (DB.grades[key].customSubjects.indexOf(name) >= 0 || DEFAULT_SUBJECTS.indexOf(name) >= 0) { showToast('Mata pelajaran sudah ada!','error','⚠️'); return; }
   DB.grades[key].customSubjects.push(name);
-  saveDB(); renderGrades();
+  waitForFirebase(function() {
+    var ref = window.dbRef(window.db, 'divinty_v3/grades/' + key + '/customSubjects');
+    window.dbSet(ref, DB.grades[key].customSubjects).catch(function(e){ console.error('Save customSubjects error:', e); });
+  });
+  renderGrades();
   showToast(name + ' ditambahkan!','success','✓');
 }
 
@@ -1025,13 +1145,17 @@ function handleAvatarUpload(event) {
     var key = currentUser ? (currentUser.username || ADMIN_KEY) : ADMIN_KEY;
     if (!DB.avatars) DB.avatars = {};
     DB.avatars[key] = e.target.result;
-    saveDB();
+    waitForFirebase(function() {
+      var ref = window.dbRef(window.db, 'divinty_v3/avatars/' + key);
+      window.dbSet(ref, e.target.result)
+        .then(function() { showToast('Foto profil diperbarui!','success','✅'); })
+        .catch(function(err) { console.error('Avatar save error:', err); showToast('Gagal menyimpan foto!','error','❌'); });
+    });
     renderProfile();
     var tv = document.getElementById('topbar-avatar');
     tv.style.backgroundImage = 'url(' + e.target.result + ')';
     tv.style.backgroundSize = 'cover';
     tv.textContent = '';
-    showToast('Foto profil diperbarui!','success','✅');
   };
   reader.readAsDataURL(file);
 }
@@ -1064,7 +1188,11 @@ function readNotif(userKey, id, el) {
   } else {
     if (notifs[id]) notifs[id].read = true;
   }
-  saveDB();
+  // Simpan granular hanya field read
+  waitForFirebase(function() {
+    var ref = window.dbRef(window.db, 'divinty_v3/notifications/' + userKey + '/' + id + '/read');
+    window.dbSet(ref, true).catch(function(e){ console.error('readNotif error:', e); });
+  });
   el.classList.remove('unread');
   updateBadge();
 }
@@ -1075,7 +1203,12 @@ function markAllRead() {
   if (!notifs) return;
   if (Array.isArray(notifs)) { notifs.forEach(function(n){n.read=true;}); }
   else { Object.values(notifs).forEach(function(n){if(n) n.read=true;}); }
-  saveDB(); renderNotifications(); updateBadge();
+  // Simpan seluruh notif user ini
+  waitForFirebase(function() {
+    var ref = window.dbRef(window.db, 'divinty_v3/notifications/' + key);
+    window.dbSet(ref, DB.notifications[key] || {}).catch(function(e){ console.error('markAllRead error:', e); });
+  });
+  renderNotifications(); updateBadge();
 }
 
 // ─── ADMIN ───
@@ -1128,7 +1261,20 @@ function deleteUser(username) {
   delete DB.moods[username];
   delete DB.online[username];
   delete DB.absensi[username];
-  saveDB(); renderAdminUsers();
+  // Hapus granular per path
+  waitForFirebase(function() {
+    var updates = {};
+    updates['divinty_v3/users/' + username]         = null;
+    updates['divinty_v3/grades/' + username]        = null;
+    updates['divinty_v3/notifications/' + username] = null;
+    updates['divinty_v3/avatars/' + username]       = null;
+    updates['divinty_v3/moods/' + username]         = null;
+    updates['divinty_v3/online/' + username]        = null;
+    updates['divinty_v3/absensi/' + username]       = null;
+    window.dbUpdate(window.dbRef(window.db), updates)
+      .catch(function(e){ console.error('Delete user error:', e); });
+  });
+  renderAdminUsers();
   showToast('Akun berhasil dihapus','success','🗑️');
 }
 
@@ -1146,8 +1292,17 @@ function postAnnouncement() {
   if (!title || !body) { showToast('Lengkapi judul dan isi!','error','⚠️'); return; }
   var ann = { id: Date.now(), title: title, body: body, type: type, deadline: deadline, subject: subject, author: currentUser ? currentUser.name : 'Admin', date: new Date().toISOString() };
   pushAnnouncement(ann);
-  Object.keys(DB.users || {}).forEach(function(uk) { addNotif(uk, '📢 ' + title, body, 'announcement'); });
-  saveDB();
+  // Kirim notif ke semua user dan simpan granular
+  var notifUpdates = {};
+  Object.keys(DB.users || {}).forEach(function(uk) {
+    addNotif(uk, '📢 ' + title, body, 'announcement');
+    notifUpdates['divinty_v3/notifications/' + uk] = DB.notifications[uk] || {};
+  });
+  waitForFirebase(function() {
+    notifUpdates['divinty_v3/announcements/' + ann.id] = ann;
+    window.dbUpdate(window.dbRef(window.db), notifUpdates)
+      .catch(function(e){ console.error('Post ann error:', e); });
+  });
   document.getElementById('ann-title-input').value  = '';
   document.getElementById('ann-body-input').value   = '';
   document.getElementById('ann-subject-input').value = '';
@@ -1170,7 +1325,11 @@ function renderAdminAnn() {
 
 function deleteAnn(id) {
   removeAnnouncement(id);
-  saveDB(); renderAdminAnn();
+  waitForFirebase(function() {
+    var ref = window.dbRef(window.db, 'divinty_v3/announcements/' + id);
+    window.dbSet(ref, null).catch(function(e){ console.error('Delete ann error:', e); });
+  });
+  renderAdminAnn();
   showToast('Pengumuman dihapus','info','🗑️');
 }
 
@@ -1199,14 +1358,26 @@ function renderPromoteList() {
 function promoteUser(username) {
   DB.users[username].isSubAdmin = true;
   addNotif(username,'⬆️ Promosi Sub-Admin','Kamu telah dipromosikan menjadi Sub-Admin!','system');
-  saveDB(); renderPromoteList();
+  waitForFirebase(function() {
+    var updates = {};
+    updates['divinty_v3/users/' + username + '/isSubAdmin'] = true;
+    updates['divinty_v3/notifications/' + username] = DB.notifications[username] || {};
+    window.dbUpdate(window.dbRef(window.db), updates).catch(function(e){ console.error('Promote error:', e); });
+  });
+  renderPromoteList();
   showToast(DB.users[username].name + ' dipromosikan!','success','⬆️');
 }
 
 function demoteUser(username) {
   DB.users[username].isSubAdmin = false;
   addNotif(username,'⬇️ Cabut Jabatan','Jabatan sub-admin kamu telah dicabut.','system');
-  saveDB(); renderPromoteList();
+  waitForFirebase(function() {
+    var updates = {};
+    updates['divinty_v3/users/' + username + '/isSubAdmin'] = false;
+    updates['divinty_v3/notifications/' + username] = DB.notifications[username] || {};
+    window.dbUpdate(window.dbRef(window.db), updates).catch(function(e){ console.error('Demote error:', e); });
+  });
+  renderPromoteList();
   showToast('Jabatan dicabut','info','⬇️');
 }
 
@@ -1272,13 +1443,27 @@ function tryAutoLogin() {
         }
         if (sess.isAdmin) {
           currentUser = { username: ADMIN_KEY, name: 'Admin', isAdmin: true };
-          DB.online[ADMIN_KEY] = Date.now();
+          // Re-set uid_map untuk admin
+          var uid = window.firebaseUID;
+          if (uid) {
+            var uidRef = window.dbRef(window.db, 'divinty_v3/uid_map/' + uid);
+            window.dbSet(uidRef, { role: 'admin', username: ADMIN_KEY }).catch(function(){});
+          }
+          var onlineRef2 = window.dbRef(window.db, 'divinty_v3/online/' + ADMIN_KEY);
+          window.dbSet(onlineRef2, Date.now()).catch(function(){});
           transitionPage('login', 'app', function() { initApp(); showToast('Auto-login sebagai Admin','info','👑'); });
         } else {
           var user = DB.users[sess.username];
           if (user) {
             currentUser = user;
-            DB.online[user.username] = Date.now();
+            // Re-set uid_map untuk siswa
+            var uid = window.firebaseUID;
+            if (uid) {
+              var uidRef = window.dbRef(window.db, 'divinty_v3/uid_map/' + uid);
+              window.dbSet(uidRef, { role: 'student', username: user.username }).catch(function(){});
+            }
+            var onlineRef3 = window.dbRef(window.db, 'divinty_v3/online/' + user.username);
+            window.dbSet(onlineRef3, Date.now()).catch(function(){});
             transitionPage('login', 'app', function() { initApp(); showToast('Selamat datang kembali, ' + user.name + '! 👋','success','✅'); });
           } else {
             localStorage.removeItem('dv_session');
@@ -1292,9 +1477,12 @@ function tryAutoLogin() {
 function doLogout() {
   localStorage.removeItem('dv_session');
   if (currentUser) {
-    // Set offline
-    if (DB.online) delete DB.online[currentUser.username || ADMIN_KEY];
-    saveDB();
+    // Set offline langsung ke node online
+    var ukey = currentUser.username || ADMIN_KEY;
+    waitForFirebase(function() {
+      var onlineRef = window.dbRef(window.db, 'divinty_v3/online/' + ukey);
+      window.dbSet(onlineRef, null).catch(function(){});
+    });
   }
   currentUser = null;
   transitionPage('app', 'login', function() {
