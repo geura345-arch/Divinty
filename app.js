@@ -4,6 +4,112 @@
    Semua fungsi harus global supaya onclick HTML bisa akses
    ═══════════════════════════════════════════════════ */
 
+// ══════════════════════════════════════════
+// ANIMATION UTILITIES
+// ══════════════════════════════════════════
+
+function ensureOverlay() {
+  if (!document.getElementById('page-overlay')) {
+    var el = document.createElement('div');
+    el.id = 'page-overlay';
+    el.className = 'page-transition-overlay';
+    document.body.appendChild(el);
+  }
+  return document.getElementById('page-overlay');
+}
+
+function transitionPage(fromId, toId, cb) {
+  var overlay = ensureOverlay();
+  overlay.classList.add('active');
+  setTimeout(function() {
+    document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
+    var to = document.getElementById('page-' + toId);
+    to.classList.add('active');
+    if (cb) cb();
+    setTimeout(function() { overlay.classList.remove('active'); }, 80);
+  }, 300);
+}
+
+var _lastSectionEl = null;
+function animateSection(newEl) {
+  if (_lastSectionEl && _lastSectionEl !== newEl) {
+    _lastSectionEl.classList.remove('active');
+  }
+  _lastSectionEl = newEl;
+  newEl.classList.remove('active');
+  void newEl.offsetWidth;
+  newEl.classList.add('active');
+}
+
+function addRipple(btn, e) {
+  var rect   = btn.getBoundingClientRect();
+  var size   = Math.max(rect.width, rect.height);
+  var x      = (e ? e.clientX : rect.left + rect.width/2) - rect.left - size/2;
+  var y      = (e ? e.clientY : rect.top  + rect.height/2) - rect.top  - size/2;
+  var ripple = document.createElement('span');
+  ripple.className = 'btn-ripple';
+  ripple.style.cssText = 'width:'+size+'px;height:'+size+'px;left:'+x+'px;top:'+y+'px;';
+  btn.appendChild(ripple);
+  setTimeout(function() { ripple.remove(); }, 700);
+}
+
+function staggerElements(parentEl, selector, delay) {
+  delay = delay || 55;
+  var els = (parentEl || document).querySelectorAll(selector);
+  els.forEach(function(el, i) {
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(10px)';
+    el.style.transition = 'none';
+    setTimeout(function() {
+      el.style.transition = 'opacity 0.32s ease, transform 0.32s cubic-bezier(0.4,0,0.2,1)';
+      el.style.opacity = '1';
+      el.style.transform = 'translateY(0)';
+    }, i * delay + 10);
+  });
+}
+
+function flashValue(elId, newVal) {
+  var el = document.getElementById(elId);
+  if (!el || el.textContent === String(newVal)) return;
+  el.style.transition = 'transform 0.18s ease, opacity 0.18s ease';
+  el.style.transform = 'scale(1.35)';
+  el.style.opacity   = '0.5';
+  setTimeout(function() {
+    el.textContent = newVal;
+    el.style.transform = 'scale(1)';
+    el.style.opacity   = '1';
+  }, 170);
+}
+
+var _currentLoginTab = 'siswa';
+function animateLoginSwitch(newTab) {
+  var formMap = { siswa:'form-siswa', admin:'form-admin', register:'form-register' };
+  var fromEl  = document.getElementById(formMap[_currentLoginTab]);
+  var toEl    = document.getElementById(formMap[newTab]);
+  if (!fromEl || !toEl || fromEl === toEl) { _currentLoginTab = newTab; return; }
+  var tabs    = ['siswa','admin','register'];
+  var goRight = tabs.indexOf(newTab) > tabs.indexOf(_currentLoginTab);
+  fromEl.style.transition = 'opacity 0.18s ease, transform 0.18s ease';
+  fromEl.style.opacity    = '0';
+  fromEl.style.transform  = 'translateX(' + (goRight ? '-18px' : '18px') + ')';
+  setTimeout(function() {
+    fromEl.style.display   = 'none';
+    fromEl.style.opacity   = '';
+    fromEl.style.transform = '';
+    toEl.style.display     = 'block';
+    toEl.style.opacity     = '0';
+    toEl.style.transform   = 'translateX(' + (goRight ? '18px' : '-18px') + ')';
+    toEl.style.transition  = 'none';
+    void toEl.offsetWidth;
+    toEl.style.transition  = 'opacity 0.28s ease, transform 0.28s cubic-bezier(0.4,0,0.2,1)';
+    toEl.style.opacity     = '1';
+    toEl.style.transform   = 'translateX(0)';
+  }, 190);
+  _currentLoginTab = newTab;
+}
+
+
+
 // ─── CONSTANTS ───
 var ADMIN_PASS   = 'Divinty2025';
 var STUDENT_PASS = 'Divintystudent';
@@ -180,21 +286,15 @@ function updateBadge() {
 function switchLoginTab(tab, btn) {
   document.querySelectorAll('.login-tab').forEach(function(t) { t.classList.remove('active'); });
   btn.classList.add('active');
-  document.getElementById('form-siswa').style.display   = tab === 'siswa' ? 'block' : 'none';
-  document.getElementById('form-admin').style.display   = tab === 'admin' ? 'block' : 'none';
-  document.getElementById('form-register').style.display = 'none';
+  animateLoginSwitch(tab);
 }
 
 function showRegister() {
-  document.getElementById('form-siswa').style.display    = 'none';
-  document.getElementById('form-admin').style.display    = 'none';
-  document.getElementById('form-register').style.display = 'block';
+  animateLoginSwitch('register');
 }
 
 function showLogin() {
-  document.getElementById('form-siswa').style.display    = 'block';
-  document.getElementById('form-admin').style.display    = 'none';
-  document.getElementById('form-register').style.display = 'none';
+  animateLoginSwitch('siswa');
 }
 
 function doLogin() {
@@ -234,9 +334,10 @@ function loginAs(user) {
   if (!DB.online) DB.online = {};
   DB.online[user.username || ADMIN_KEY] = Date.now();
   saveDB();
-  switchPage('app');
-  initApp();
-  showToast('Selamat datang, ' + user.name + '! 👋','success','✅');
+  transitionPage('login', 'app', function() {
+    initApp();
+    showToast('Selamat datang, ' + user.name + '! 👋','success','✅');
+  });
 }
 
 // ─── PAGES & SECTIONS ───
@@ -246,9 +347,8 @@ function switchPage(page) {
 }
 
 function showSection(id, navEl, mode) {
-  document.querySelectorAll('.section').forEach(function(s) { s.classList.remove('active'); });
   var target = document.getElementById('section-' + id);
-  if (target) target.classList.add('active');
+  if (target) animateSection(target);
 
   document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
   if (navEl) navEl.classList.add('active');
@@ -259,14 +359,14 @@ function showSection(id, navEl, mode) {
   }
 
   var renders = {
-    dashboard:  function() { renderDashboard(); },
-    tugas:      function() { renderTasks(announcementFilter); },
+    dashboard:  function() { renderDashboard(); setTimeout(function(){ staggerElements(target, '.ann-card, .stat-card, .mood-item'); }, 100); },
+    tugas:      function() { renderTasks(announcementFilter); setTimeout(function(){ staggerElements(target, '.task-card'); }, 100); },
     kelompok:   function() { renderKelompokPage(); },
-    nilai:      function() { renderGrades(); },
-    rank:       function() { renderRank(); },
-    profile:    function() { renderProfile(); },
-    divintybox: function() { renderNotifications(); updateBadge(); },
-    admin:      function() { renderAdmin(); }
+    nilai:      function() { renderGrades(); setTimeout(function(){ staggerElements(target, '.grade-row'); }, 100); },
+    rank:       function() { renderRank(); setTimeout(function(){ staggerElements(target, '.rank-item'); }, 100); },
+    profile:    function() { renderProfile(); setTimeout(function(){ staggerElements(target, '.info-row'); }, 100); },
+    divintybox: function() { renderNotifications(); updateBadge(); setTimeout(function(){ staggerElements(target, '.notif-item'); }, 100); },
+    admin:      function() { renderAdmin(); setTimeout(function(){ staggerElements(target, '.user-row'); }, 100); }
   };
   if (renders[id]) renders[id]();
 }
@@ -337,17 +437,17 @@ function renderDashboard() {
 }
 
 function updateStatCards() {
-  document.getElementById('stat-members').textContent = Object.keys(DB.users || {}).length;
-  document.getElementById('stat-online').textContent  = countOnline();
+  flashValue('stat-members', Object.keys(DB.users || {}).length);
+  flashValue('stat-online',  countOnline());
 
   if (currentUser && !currentUser.isAdmin) {
     var avg  = calcUserAvg(currentUser.username);
     var rank = getUserRank(currentUser.username);
-    document.getElementById('stat-avg').textContent  = avg  ? avg.toFixed(1) : '—';
-    document.getElementById('stat-rank').textContent = rank ? '#' + rank : '#—';
+    flashValue('stat-avg',  avg  ? avg.toFixed(1) : '—');
+    flashValue('stat-rank', rank ? '#' + rank : '#—');
   } else {
-    document.getElementById('stat-avg').textContent  = '—';
-    document.getElementById('stat-rank').textContent = '#—';
+    flashValue('stat-avg',  '—');
+    flashValue('stat-rank', '#—');
   }
 }
 
@@ -1117,4 +1217,28 @@ document.addEventListener('DOMContentLoaded', function() {
   // Group count change
   var groupCountEl = document.getElementById('group-count');
   if (groupCountEl) groupCountEl.addEventListener('input', updateGroupCalcInfo);
+
+  // Ripple on all primary buttons
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('.btn-primary, .filter-tab, .admin-tab, .sem-tab, .login-tab');
+    if (btn) addRipple(btn, e);
+  });
+
+  // Countdown flip animation
+  var _prevCdVals = {};
+  var _origTick = tickCountdown;
+  tickCountdown = function() {
+    _origTick();
+    ['cd-days','cd-hours','cd-mins','cd-secs'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var val = el.textContent;
+      if (_prevCdVals[id] !== val) {
+        el.classList.remove('flip');
+        void el.offsetWidth;
+        el.classList.add('flip');
+        _prevCdVals[id] = val;
+      }
+    });
+  };
 });
