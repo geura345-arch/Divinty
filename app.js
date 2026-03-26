@@ -118,7 +118,8 @@ var ADMIN_KEY    = '__admin__';
 
 var DEFAULT_SUBJECTS = [
   'Matematika','Bahasa Indonesia','Bahasa Inggris','Fisika','Kimia',
-  'Biologi','Sejarah','Geografi','Ekonomi','Sosiologi'
+  'Biologi','Sejarah','Geografi','Ekonomi','Sosiologi','Pendidikan Pancasila','Seni Budaya','Pendidikan Jasmani','TIK','Pendidikan Agama',
+  'Muatan Lokal'
 ];
 
 var MOODS = [
@@ -333,7 +334,7 @@ function doRegister() {
   var dob      = document.getElementById('reg-dob').value;
   var password = document.getElementById('reg-password').value;
   if (!name || !dob || !password) { showToast('Lengkapi semua field!','error','⚠️'); return; }
-  if (password !== STUDENT_PASS)  { showToast('Password salah! Gunakan: ' + STUDENT_PASS,'error','❌'); return; }
+  if (password !== STUDENT_PASS)  { showToast('Password salah! Gunakan : Password yang sudah ditentukan','error','❌'); return; }
   var username = name.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
   if (DB.users[username]) { showToast('Username sudah dipakai! Coba nama lain','error','⚠️'); return; }
   DB.users[username] = { username: username, name: name, dob: dob, password: password, joinDate: new Date().toISOString(), isSubAdmin: false };
