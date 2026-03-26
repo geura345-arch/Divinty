@@ -1398,22 +1398,10 @@ textarea.form-input { resize: vertical; min-height: 100px; }
   opacity: 0;
 }
 
-/* Login tab active indicator */
+/* Login tab active indicator - NO underline */
 .login-tab {
   position: relative;
   overflow: hidden;
-}
-.login-tab::after {
-  content: '';
-  position: absolute;
-  bottom: 0; left: 50%;
-  width: 0; height: 2px;
-  background: white;
-  border-radius: 2px;
-  transition: width 0.3s ease, left 0.3s ease;
-}
-.login-tab.active::after {
-  width: 60%; left: 20%;
 }
 
 /* Btn ripple effect */

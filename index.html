@@ -15,6 +15,8 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
   import { getDatabase, ref, set, onValue, update, push, remove, get }
     from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+  import { getAuth, signInAnonymously, onAuthStateChanged }
+    from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAVwZ8N41ltNNQe2c1ZwkyHW5aveBMpLlg",
@@ -26,9 +28,11 @@
     appId: "1:89096652727:web:c3863e9a9afe6cca718a32"
   };
 
-  const app = initializeApp(firebaseConfig);
-  const db  = getDatabase(app);
+  const app  = initializeApp(firebaseConfig);
+  const db   = getDatabase(app);
+  const auth = getAuth(app);
 
+  // Expose DB functions ke window
   window.db        = db;
   window.dbRef     = ref;
   window.dbSet     = set;
@@ -37,10 +41,25 @@
   window.dbPush    = push;
   window.dbRemove  = remove;
   window.dbGet     = get;
+  window.fbAuth    = auth;
 
-  // Sinyal ke app.js bahwa Firebase sudah siap
-  window.firebaseReady = true;
-  window.dispatchEvent(new Event('firebase-ready'));
+  // Login anonim otomatis — setiap user dapat UID unik dari Firebase
+  // UID ini dipakai di rules untuk membedakan siapa boleh ngapain
+  signInAnonymously(auth).catch(function(e) {
+    console.warn('Anon auth failed:', e);
+    // Fallback: tetap jalan tanpa auth (rules mode terbuka)
+    window.firebaseReady = true;
+    window.dispatchEvent(new Event('firebase-ready'));
+  });
+
+  onAuthStateChanged(auth, function(user) {
+    if (user) {
+      window.firebaseUID = user.uid;
+      // Simpan UID ke window supaya app.js bisa akses
+      window.firebaseReady = true;
+      window.dispatchEvent(new Event('firebase-ready'));
+    }
+  });
 </script>
 </head>
 <body>
@@ -75,13 +94,17 @@
 
     <div id="form-siswa">
       <div class="form-group">
-        <label class="form-label">Username</label>
-        <input class="form-input" type="text" id="login-username" placeholder="Nama kamu..." autocomplete="off">
+        <label class="form-label">Username / Nama Lengkap</label>
+        <input class="form-input" type="text" id="login-username" placeholder="Nama atau username kamu..." autocomplete="off">
       </div>
       <div class="form-group">
         <label class="form-label">Password</label>
         <input class="form-input" type="password" id="login-password" placeholder="••••••••">
       </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;cursor:pointer;font-size:0.82rem;color:var(--text-dim)">
+        <input type="checkbox" id="remember-me" checked style="width:15px;height:15px;accent-color:var(--red);cursor:pointer">
+        Ingat saya di perangkat ini
+      </label>
       <button class="btn-primary" onclick="doLogin()">MASUK →</button>
       <p class="switch-link">Belum punya akun? <a onclick="showRegister()">Daftar Sekarang</a></p>
     </div>
@@ -105,8 +128,8 @@
       </div>
       <div class="form-group">
         <label class="form-label">Password</label>
-        <input class="form-input" type="password" id="reg-password" placeholder="Gunakan : Password siswa">
-        <p style="font-size:0.72rem;color:var(--text-muted);margin-top:5px">Password siswa: <strong class="text-red">Tanya Admin Kelas</strong></p>
+        <input class="form-input" type="password" id="reg-password" placeholder="Gunakan: Divintystudent">
+        <p style="font-size:0.72rem;color:var(--text-muted);margin-top:5px">Password siswa: <strong class="text-red">Divintystudent</strong></p>
       </div>
       <button class="btn-primary" onclick="doRegister()">DAFTAR SEKARANG →</button>
       <p class="switch-link">Sudah punya akun? <a onclick="showLogin()">Masuk</a></p>
@@ -144,6 +167,7 @@
         <div class="topbar-right">
           <div class="topbar-btn" onclick="showSection('divintybox')">📬<span class="badge" id="topbar-badge" style="display:none">0</span></div>
           <div class="avatar-topbar" id="topbar-avatar" onclick="showSection('profile')">D</div>
+          <div class="topbar-btn" onclick="doLogout()" title="Keluar" style="color:var(--red-light)">🚪</div>
         </div>
       </div>
       <div class="hero-banner">

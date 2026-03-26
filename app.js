@@ -32,12 +32,13 @@ function transitionPage(fromId, toId, cb) {
 
 var _lastSectionEl = null;
 function animateSection(newEl) {
-  if (_lastSectionEl && _lastSectionEl !== newEl) {
-    _lastSectionEl.classList.remove('active');
-  }
+  // Semua section disembunyikan dulu
+  document.querySelectorAll('.section').forEach(function(s) {
+    if (s !== newEl) s.classList.remove('active');
+  });
   _lastSectionEl = newEl;
   newEl.classList.remove('active');
-  void newEl.offsetWidth;
+  void newEl.offsetWidth; // reflow agar animasi restart
   newEl.classList.add('active');
 }
 
@@ -298,12 +299,27 @@ function showLogin() {
 }
 
 function doLogin() {
-  var username = document.getElementById('login-username').value.trim().toLowerCase().replace(/\s/g,'_');
+  var input    = document.getElementById('login-username').value.trim();
   var password = document.getElementById('login-password').value;
-  if (!username || !password) { showToast('Isi username dan password!','error','⚠️'); return; }
-  var user = DB.users[username];
+  var remEl    = document.getElementById('remember-me');
+  var remember = remEl ? remEl.checked : true;
+  if (!input || !password) { showToast('Isi username dan password!','error','⚠️'); return; }
+
+  // Cari by username (slug)
+  var slug = input.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
+  var user = DB.users[slug];
+
+  // Kalau tidak ketemu, cari by nama lengkap
+  if (!user) {
+    var lc = input.toLowerCase();
+    var keys = Object.keys(DB.users || {});
+    for (var i = 0; i < keys.length; i++) {
+      if (DB.users[keys[i]].name.toLowerCase() === lc) { user = DB.users[keys[i]]; break; }
+    }
+  }
+
   if (!user || user.password !== password) { showToast('Username atau password salah!','error','❌'); return; }
-  loginAs(user);
+  loginAs(user, remember);
 }
 
 function doAdminLogin() {
@@ -317,7 +333,7 @@ function doRegister() {
   var dob      = document.getElementById('reg-dob').value;
   var password = document.getElementById('reg-password').value;
   if (!name || !dob || !password) { showToast('Lengkapi semua field!','error','⚠️'); return; }
-  if (password !== STUDENT_PASS)  { showToast('Password salah!,Gunakan: Password Yang Benar ','error','❌'); return; }
+  if (password !== STUDENT_PASS)  { showToast('Password salah! Gunakan: ' + STUDENT_PASS,'error','❌'); return; }
   var username = name.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
   if (DB.users[username]) { showToast('Username sudah dipakai! Coba nama lain','error','⚠️'); return; }
   DB.users[username] = { username: username, name: name, dob: dob, password: password, joinDate: new Date().toISOString(), isSubAdmin: false };
@@ -329,10 +345,34 @@ function doRegister() {
   document.getElementById('login-username').value = username;
 }
 
-function loginAs(user) {
+function loginAs(user, rememberMe) {
   currentUser = user;
   if (!DB.online) DB.online = {};
   DB.online[user.username || ADMIN_KEY] = Date.now();
+
+  // Simpan mapping Firebase UID → role/username
+  // Ini yang dipakai rules untuk tahu siapa admin
+  var uid = window.firebaseUID;
+  if (uid) {
+    waitForFirebase(function() {
+      var updates = {};
+      updates['divinty_v3/uid_map/' + uid] = {
+        role: user.isAdmin ? 'admin' : 'student',
+        username: user.username || ADMIN_KEY
+      };
+      window.dbUpdate(window.dbRef(window.db), updates).catch(function(){});
+    });
+  }
+
+  if (rememberMe !== false) {
+    try {
+      localStorage.setItem('dv_session', JSON.stringify({
+        username: user.username || ADMIN_KEY,
+        isAdmin: user.isAdmin || false,
+        ts: Date.now()
+      }));
+    } catch(e) {}
+  }
   saveDB();
   transitionPage('login', 'app', function() {
     initApp();
@@ -406,12 +446,19 @@ function initApp() {
   initCountdown();
   renderDashboard();
 
+  // Update online status setiap 60 detik langsung ke Firebase (efisien)
   setInterval(function() {
-    if (currentUser) {
-      DB.online[currentUser.username || ADMIN_KEY] = Date.now();
-      saveDB();
-    }
-  }, 30000);
+    if (!currentUser) return;
+    var ukey = currentUser.username || ADMIN_KEY;
+    var now  = Date.now();
+    if (!DB.online) DB.online = {};
+    DB.online[ukey] = now;
+    waitForFirebase(function() {
+      var updates = {};
+      updates['divinty_v3/online/' + ukey] = now;
+      window.dbUpdate(window.dbRef(window.db), updates).catch(function(){});
+    });
+  }, 60000);
   setInterval(function() { tickCountdown(); updateBadge(); }, 1000);
   setInterval(function() {
     if (document.getElementById('section-dashboard').classList.contains('active')) updateStatCards();
@@ -1164,11 +1211,14 @@ function demoteUser(username) {
 
 // ─── ONLINE ───
 function isUserOnline(username) {
+  if (!username) return false;
   var last = DB.online && DB.online[username];
-  return last && (Date.now() - last < 90000);
+  if (!last) return false;
+  return (Date.now() - last) < 120000; // 2 menit threshold
 }
 function countOnline() {
-  return Object.keys(DB.online || {}).filter(function(k) { return isUserOnline(k); }).length;
+  // Hanya hitung user yang terdaftar di DB.users (exclude admin phantom key)
+  return Object.keys(DB.users || {}).filter(function(k) { return isUserOnline(k); }).length;
 }
 
 // ─── MODAL ───
@@ -1197,10 +1247,72 @@ function calcAge(dob) {
   return age;
 }
 
+// ─── SESSION RESTORE (Auto-Login) ───
+function tryAutoLogin() {
+  try {
+    var raw = localStorage.getItem('dv_session');
+    if (!raw) return;
+    var sess = JSON.parse(raw);
+    if (!sess || (Date.now() - sess.ts) > 7 * 24 * 3600 * 1000) {
+      localStorage.removeItem('dv_session'); return;
+    }
+    // Tunggu Firebase + DB loaded, lalu auto-login
+    waitForFirebase(function() {
+      var ref = window.dbRef(window.db, 'divinty_v3');
+      window.dbGet(ref).then(function(snap) {
+        var data = snap.val();
+        if (data) {
+          DB = {
+            users: data.users || {}, grades: data.grades || {},
+            notifications: data.notifications || {}, avatars: data.avatars || {},
+            moods: data.moods || {}, online: data.online || {},
+            announcements: data.announcements || {}, absensi: data.absensi || {}
+          };
+        }
+        if (sess.isAdmin) {
+          currentUser = { username: ADMIN_KEY, name: 'Admin', isAdmin: true };
+          DB.online[ADMIN_KEY] = Date.now();
+          transitionPage('login', 'app', function() { initApp(); showToast('Auto-login sebagai Admin','info','👑'); });
+        } else {
+          var user = DB.users[sess.username];
+          if (user) {
+            currentUser = user;
+            DB.online[user.username] = Date.now();
+            transitionPage('login', 'app', function() { initApp(); showToast('Selamat datang kembali, ' + user.name + '! 👋','success','✅'); });
+          } else {
+            localStorage.removeItem('dv_session');
+          }
+        }
+      }).catch(function() { localStorage.removeItem('dv_session'); });
+    });
+  } catch(e) { localStorage.removeItem('dv_session'); }
+}
+
+function doLogout() {
+  localStorage.removeItem('dv_session');
+  if (currentUser) {
+    // Set offline
+    if (DB.online) delete DB.online[currentUser.username || ADMIN_KEY];
+    saveDB();
+  }
+  currentUser = null;
+  transitionPage('app', 'login', function() {
+    document.getElementById('login-username').value = '';
+    document.getElementById('login-password').value = '';
+    _currentLoginTab = 'siswa';
+    document.getElementById('form-siswa').style.display    = 'block';
+    document.getElementById('form-admin').style.display    = 'none';
+    document.getElementById('form-register').style.display = 'none';
+    document.querySelectorAll('.login-tab').forEach(function(t,i){ t.classList.toggle('active', i===0); });
+  });
+}
+
 // ─── DOM READY ───
 document.addEventListener('DOMContentLoaded', function() {
-  // Load DB setelah Firebase siap
   loadDB();
+
+  // Auto-login dari session tersimpan
+  setTimeout(tryAutoLogin, 600); // Delay sedikit biar Firebase modul siap
 
   // Enter key untuk login
   document.addEventListener('keydown', function(e) {
